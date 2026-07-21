@@ -1,0 +1,147 @@
+// Everroot — the Living Legacy Forest
+// The Forest is the source of truth. Every object in the system is a node in a
+// graph. The 3D Forest visualization is generated directly from this graph data,
+// never from hardcoded UI structures.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  profile      Profile?
+  nodes        ForestNode[]
+  edges        ForestEdge[]
+
+  @@map("users")
+}
+
+// A user's profile is the SEED metadata — who this tree belongs to.
+model Profile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  displayName   String
+  birthYear     Int?
+  familyPosition String? // e.g. "Grandfather", "Mother", "Son"
+  avatarUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// ---------------------------------------------------------------------------
+// The Forest Graph
+// ---------------------------------------------------------------------------
+
+// Every object in Everroot is a ForestNode. The node's kind determines how the
+// Forest renderer draws it (seed, trunk, branch, leaf, flower, fruit, roots...)
+// and the growth engine uses node counts + weights to compute the tree's stage.
+enum NodeKind {
+  SEED
+  ROOT
+  TRUNK
+  BRANCH
+  SUB_BRANCH
+  LEAF
+  FLOWER
+  FRUIT
+  MEMORY
+  PHOTO
+  PERSON
+  RELATIONSHIP
+  TIMELINE_EVENT
+  MEMORY_MOMENT
+}
+
+// Life Epochs — every memory is assigned to one or more of these.
+enum LifeEpoch {
+  ROOTS        // 0-12
+  FIRST_STEPS  // 13-22
+  CROSSROADS   // 23-35
+  ANCHORS      // 36-50
+  STORMS       // 51-65
+  HARVEST      // 66-80
+  HORIZONS     // 81+
+}
+
+model ForestNode {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      NodeKind
+  title     String
+  summary   String?  @db.Text
+
+  // Optional structured payload for the node (transcript, audio url, people,
+  // places, emotional tags, etc.). Kept as JSON so every content type can feed
+  // the same graph without schema churn during Phase 1.
+  data      Json?
+
+  epoch     LifeEpoch?
+  // Legacy score contribution of this node. The tree's total score is the sum
+  // of its nodes' scores; growth stage is derived from the total.
+  score     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Graph edges where this node is the source / target.
+  edgesFrom ForestEdge[] @relation("EdgeFrom")
+  edgesTo   ForestEdge[] @relation("EdgeTo")
+
+  @@index([userId])
+  @@index([userId, kind])
+  @@map("forest_nodes")
+}
+
+// How nodes connect. CONTAINS builds the tree hierarchy (trunk contains branch,
+// branch contains leaf). Others capture semantic links (a leaf MENTIONS a
+// person, a person is FAMILY of another person, roots ANCESTOR_OF the trunk).
+enum EdgeKind {
+  CONTAINS      // structural parent -> child (trunk->branch->leaf)
+  GREW_INTO     // seed -> trunk growth history
+  MENTIONS      // memory -> person / place
+  RELATED_TO    // generic memory <-> memory link
+  FAMILY        // person <-> person family relationship
+  ANCESTOR_OF   // root -> trunk (heritage)
+  OCCURRED_IN   // memory -> timeline event / epoch
+}
+
+model ForestEdge {
+  id         String   @id @default(cuid())
+  userId     String
+  kind       EdgeKind
+  fromNodeId String
+  toNodeId   String
+  // e.g. FAMILY edges store "Wife" / "Grandchild"; free-form label.
+  label      String?
+  createdAt  DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromNode   ForestNode @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode     ForestNode @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([fromNodeId, toNodeId, kind])
+  @@index([userId])
+  @@index([fromNodeId])
+  @@index([toNodeId])
+  @@map("forest_edges")
+}

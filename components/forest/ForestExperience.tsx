@@ -1,0 +1,124 @@
+"use client";
+
+import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import type { ForestGraph, ForestNodeDTO } from "@/lib/forest/types";
+import { GROWTH_STAGES } from "@/lib/forest/types";
+import GrowthPanel from "./GrowthPanel";
+import { signOutAction } from "@/app/actions/forest";
+
+// three.js only runs in the browser — load the canvas without SSR.
+const ForestCanvas = dynamic(() => import("./ForestCanvas"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full w-full items-center justify-center text-parchment/50">
+      Growing your forest…
+    </div>
+  ),
+});
+
+const NEXT_STAGE_LABEL: Record<string, { min: number; label: string } | null> = Object.fromEntries(
+  GROWTH_STAGES.map((s, i) => [
+    s.stage,
+    GROWTH_STAGES[i + 1] ? { min: GROWTH_STAGES[i + 1].minScore, label: GROWTH_STAGES[i + 1].label } : null,
+  ]),
+);
+
+export default function ForestExperience({ graph }: { graph: ForestGraph }) {
+  const router = useRouter();
+  const [selected, setSelected] = useState<ForestNodeDTO | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+
+  const handleGrew = useCallback(() => {
+    router.refresh();
+  }, [router]);
+
+  const stageMeta = GROWTH_STAGES.find((s) => s.stage === graph.stage);
+  const next = NEXT_STAGE_LABEL[graph.stage];
+  const memoryCount =
+    graph.counts.LEAF + graph.counts.FLOWER + graph.counts.FRUIT + graph.counts.MEMORY_MOMENT + graph.counts.PHOTO;
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden">
+      <div className="absolute inset-0">
+        <ForestCanvas graph={graph} selectedId={selected?.id ?? null} onSelect={setSelected} />
+      </div>
+
+      {/* Top-left: whose forest + growth stage. */}
+      <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans">
+        <p className="text-xs uppercase tracking-[0.25em] text-canopy-light">Everroot</p>
+        <h1 className="font-serif text-2xl text-parchment">
+          {graph.profile.displayName}
+          {graph.profile.familyPosition ? (
+            <span className="text-parchment/50"> · {graph.profile.familyPosition}</span>
+          ) : null}
+        </h1>
+        <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-sm">
+          <span className="text-fruit">{stageMeta?.label ?? graph.stage}</span>
+          <span className="text-parchment/40">·</span>
+          <span className="text-parchment/80">Legacy {graph.legacyScore}</span>
+        </div>
+        {next ? (
+          <p className="mt-1 text-xs text-parchment/50">
+            {next.min - graph.legacyScore > 0
+              ? `${next.min - graph.legacyScore} more to reach ${next.label}`
+              : `Ready to become ${next.label}`}
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-parchment/50">Fully grown — an ancient legacy</p>
+        )}
+        <p className="mt-2 text-xs text-parchment/40">
+          {memoryCount} memories · {graph.counts.PERSON} family · {graph.counts.ROOT} roots
+        </p>
+      </div>
+
+      {/* Sign out. */}
+      <form action={signOutAction} className="absolute right-5 top-5 font-sans">
+        <button className="rounded-full border border-parchment/20 bg-black/40 px-4 py-1.5 text-sm text-parchment/80 transition hover:border-parchment/50">
+          Sign out
+        </button>
+      </form>
+
+      {/* Selected node detail. */}
+      {selected ? (
+        <div className="absolute bottom-5 left-5 max-w-sm rounded-2xl border border-parchment/15 bg-black/70 p-5 font-sans backdrop-blur">
+          <p className="text-xs uppercase tracking-widest text-canopy-light">
+            {selected.kind.replace(/_/g, " ")}
+          </p>
+          <h2 className="mt-1 font-serif text-xl text-parchment">{selected.title}</h2>
+          {selected.summary ? (
+            <p className="mt-2 text-sm text-parchment/75">{selected.summary}</p>
+          ) : null}
+          {selected.epoch ? (
+            <p className="mt-2 text-xs text-parchment/50">Epoch · {selected.epoch.replace(/_/g, " ")}</p>
+          ) : null}
+          <button
+            onClick={() => setSelected(null)}
+            className="mt-3 text-xs text-parchment/50 hover:text-parchment"
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
+
+      {/* Growth panel. */}
+      <div className="absolute bottom-5 right-5 w-80 max-w-[90vw] font-sans">
+        <div className="rounded-2xl border border-parchment/15 bg-black/70 backdrop-blur">
+          <button
+            onClick={() => setPanelOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-3 text-left"
+          >
+            <span className="font-serif text-lg text-parchment">Grow your forest</span>
+            <span className="text-parchment/50">{panelOpen ? "–" : "+"}</span>
+          </button>
+          {panelOpen ? (
+            <div className="border-t border-parchment/10 p-5 pt-4">
+              <GrowthPanel onGrew={handleGrew} />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
