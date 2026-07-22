@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import { grow } from "@/lib/forest/growth-engine";
+import { prisma } from "@/lib/prisma";
+import { grow, ensurePerson, linkMention } from "@/lib/forest/growth-engine";
 import { recordings } from "@/lib/recordings";
 import { ALL_QUESTIONS, MOMENT_TYPE_BY_QUESTION } from "@/lib/interview/script";
 
@@ -54,6 +55,38 @@ export async function POST(req: Request) {
     },
   });
 
+  // Weave the memory graph: connect this memory to the people who were part of
+  // it. Each entry is either an existing person ({ id }) or a new one to plant
+  // ({ name, relationship? }). We return the canonical [{ id, name }] so the
+  // client can reuse freshly planted saplings on later questions.
+  const linkedPeople: { id: string; name: string }[] = [];
+  const rawPeople = form.get("people");
+  if (typeof rawPeople === "string" && rawPeople.trim()) {
+    try {
+      const parsed = JSON.parse(rawPeople) as Array<{
+        id?: string;
+        name?: string;
+        relationship?: string;
+      }>;
+      for (const p of Array.isArray(parsed) ? parsed : []) {
+        let personId = p.id;
+        let personName = p.name?.trim() ?? "";
+        if (!personId && personName) {
+          personId = await ensurePerson(userId, personName, p.relationship);
+        }
+        if (!personId) continue;
+        if (!personName) {
+          const node = await prisma.forestNode.findUnique({ where: { id: personId } });
+          personName = node?.title ?? "";
+        }
+        await linkMention(userId, result.createdNodeId, personId);
+        linkedPeople.push({ id: personId, name: personName });
+      }
+    } catch {
+      /* malformed people payload — skip linking, still save the memory */
+    }
+  }
+
   // Store the recording, if the browser captured one.
   let recordingId: string | null = null;
   if (audio instanceof Blob && audio.size > 0) {
@@ -80,5 +113,6 @@ export async function POST(req: Request) {
     createdKind: result.createdKind,
     legacyScore: result.newLegacyScore,
     recordingId,
+    linkedPeople,
   });
 }

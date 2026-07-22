@@ -228,6 +228,60 @@ export async function recomputeLegacyScore(tx: Tx, userId: string): Promise<numb
   return agg._sum.score ?? 0;
 }
 
+/**
+ * Find an existing family member (PERSON node) by name, or plant one as a new
+ * sapling. Names are matched case-insensitively so "Mom" isn't planted twice.
+ * Returns the PERSON node's id.
+ */
+export async function ensurePerson(
+  userId: string,
+  name: string,
+  relationship?: string,
+): Promise<string> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("A person needs a name.");
+
+  const existing = await prisma.forestNode.findFirst({
+    where: { userId, kind: "PERSON", title: { equals: trimmed, mode: "insensitive" } },
+  });
+  if (existing) return existing.id;
+
+  const res = await grow(userId, {
+    type: "add_family_member",
+    title: trimmed,
+    relationship,
+  });
+  return res.createdNodeId;
+}
+
+/**
+ * Weave a semantic thread: this memory MENTIONS this person. Idempotent — the
+ * ForestEdge unique constraint (from, to, kind) makes re-linking a no-op.
+ */
+export async function linkMention(
+  userId: string,
+  memoryNodeId: string,
+  personNodeId: string,
+): Promise<void> {
+  if (memoryNodeId === personNodeId) return;
+  await prisma.forestEdge.upsert({
+    where: {
+      fromNodeId_toNodeId_kind: {
+        fromNodeId: memoryNodeId,
+        toNodeId: personNodeId,
+        kind: "MENTIONS",
+      },
+    },
+    update: {},
+    create: {
+      userId,
+      kind: "MENTIONS",
+      fromNodeId: memoryNodeId,
+      toNodeId: personNodeId,
+    },
+  });
+}
+
 /** Create the initial SEED for a brand-new account. */
 export async function plantSeed(
   userId: string,

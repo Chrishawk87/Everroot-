@@ -24,7 +24,15 @@ function pickMimeType(): string {
   return "";
 }
 
-export default function InterviewExperience({ displayName }: { displayName: string }) {
+type Person = { id: string | null; name: string; relationship?: string | null };
+
+export default function InterviewExperience({
+  displayName,
+  people = [],
+}: {
+  displayName: string;
+  people?: { id: string; name: string; relationship: string | null }[];
+}) {
   const router = useRouter();
 
   const [phase, setPhase] = useState<Phase>("intro");
@@ -34,6 +42,42 @@ export default function InterviewExperience({ displayName }: { displayName: stri
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [patience, setPatience] = useState(PATIENCE_LINES[0]);
+
+  // Who-was-there roster. Seeded with the family already in the forest; grows as
+  // the person names new people. Selection resets per question.
+  const [roster, setRoster] = useState<Person[]>(() =>
+    people.map((p) => ({ id: p.id, name: p.name, relationship: p.relationship })),
+  );
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [newName, setNewName] = useState("");
+  const keyOf = (p: Person) => p.id ?? `new:${p.name.toLowerCase()}`;
+
+  const togglePerson = useCallback((p: Person) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      const k = p.id ?? `new:${p.name.toLowerCase()}`;
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }, []);
+
+  const addPerson = useCallback(() => {
+    const name = newName.trim();
+    if (!name) return;
+    setNewName("");
+    setRoster((prev) => {
+      const existing = prev.find((r) => r.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        const k = existing.id ?? `new:${existing.name.toLowerCase()}`;
+        setSelectedKeys((s) => new Set(s).add(k));
+        return prev;
+      }
+      const added: Person = { id: null, name, relationship: null };
+      setSelectedKeys((s) => new Set(s).add(`new:${name.toLowerCase()}`));
+      return [...prev, added];
+    });
+  }, [newName]);
 
   const [canRecognize, setCanRecognize] = useState(false);
   const [canRecordAudio, setCanRecordAudio] = useState(false);
@@ -320,6 +364,8 @@ export default function InterviewExperience({ displayName }: { displayName: stri
     committedRef.current = "";
     setTranscript("");
     setHasRecorded(false);
+    setSelectedKeys(new Set());
+    setNewName("");
   }, [hardStopRecording]);
 
   const pickAck = useCallback(() => {
@@ -400,17 +446,45 @@ export default function InterviewExperience({ displayName }: { displayName: stri
         const ext = (blob.type.split("/")[1] || "webm").split(";")[0];
         fd.append("audio", blob, `answer.${ext}`);
       }
+
+      // The people the person tapped as part of this story.
+      const selected = roster.filter((p) => selectedKeys.has(keyOf(p)));
+      if (selected.length) {
+        fd.append(
+          "people",
+          JSON.stringify(
+            selected.map((p) =>
+              p.id ? { id: p.id } : { name: p.name, relationship: p.relationship ?? undefined },
+            ),
+          ),
+        );
+      }
+
       const res = await fetch("/api/interview/answer", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Something went wrong saving that.");
       }
+
+      // Adopt real ids for any freshly planted people so later questions reuse
+      // the same sapling instead of planting a duplicate.
+      if (Array.isArray(data.linkedPeople) && data.linkedPeople.length) {
+        const linked = data.linkedPeople as { id: string; name: string }[];
+        setRoster((prev) =>
+          prev.map((p) => {
+            if (p.id) return p;
+            const match = linked.find((l) => l.name.toLowerCase() === p.name.toLowerCase());
+            return match ? { ...p, id: match.id } : p;
+          }),
+        );
+      }
+
       goToQuestion(qi + 1, pickAck());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong saving that.");
       setPhase("review");
     }
-  }, [question, transcript, hasRecorded, phase, finalizeRecording, goToQuestion, qi, pickAck]);
+  }, [question, transcript, hasRecorded, phase, finalizeRecording, goToQuestion, qi, pickAck, roster, selectedKeys]);
 
   // Rotate the patience line while recording.
   useEffect(() => {
@@ -523,6 +597,60 @@ export default function InterviewExperience({ displayName }: { displayName: stri
 
             {error ? (
               <p className="mt-3 rounded-lg bg-red-900/40 px-4 py-2 text-sm text-red-200">{error}</p>
+            ) : null}
+
+            {hasContent && phase !== "recording" ? (
+              <div className="mt-6 rounded-2xl border border-parchment/10 bg-black/20 p-4">
+                <p className="text-sm text-parchment/85">Who was part of this story?</p>
+                <p className="mt-1 text-xs text-parchment/45">
+                  Tap anyone who was there — I'll connect this memory to them in your forest.
+                </p>
+                {roster.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {roster.map((p) => {
+                      const on = selectedKeys.has(keyOf(p));
+                      return (
+                        <button
+                          key={keyOf(p)}
+                          type="button"
+                          onClick={() => togglePerson(p)}
+                          className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                            on
+                              ? "border-fruit/70 bg-fruit/20 text-parchment"
+                              : "border-parchment/20 text-parchment/60 hover:border-parchment/50 hover:text-parchment"
+                          }`}
+                        >
+                          {p.name}
+                          {p.relationship ? (
+                            <span className="text-parchment/40"> · {p.relationship}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addPerson();
+                      }
+                    }}
+                    placeholder="Add someone by name…"
+                    className="flex-1 rounded-full border border-parchment/15 bg-black/30 px-4 py-1.5 text-sm text-parchment outline-none transition focus:border-canopy-light"
+                  />
+                  <button
+                    type="button"
+                    onClick={addPerson}
+                    className="rounded-full border border-parchment/25 px-4 py-1.5 text-sm text-parchment/70 transition hover:border-parchment/60 hover:text-parchment"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
             ) : null}
 
             <div className="mt-6 flex flex-wrap items-center gap-3">

@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Html, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import type { ForestGraph, ForestNodeDTO, GrowthStage } from "@/lib/forest/types";
-import { computeLayout, type PositionedNode, type Vec3, type Limb } from "@/lib/forest/layout";
+import { computeLayout, type PositionedNode, type Vec3, type Limb, type ForestLayout } from "@/lib/forest/layout";
 
 const COLORS: Record<string, string> = {
   SEED: "#c9a86a",
@@ -239,6 +239,9 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect }: P
         <Canopy center={crownCenter} radius={crown.r} count={crown.count} leafTex={leafTex} />
       ) : null}
 
+      {/* Memory graph: glowing threads between memories and the people in them. */}
+      <MemoryThreads graph={graph} layout={layout} selectedId={selectedId} />
+
       {/* Interactive memory nodes (glow within the canopy). */}
       {layout.positioned
         .filter((p) => p.node.kind !== "TRUNK" && !HIDDEN.has(p.node.kind))
@@ -281,6 +284,102 @@ function CameraRig({ focusPos }: { focusPos: Vec3 | null }) {
     controls.update();
   });
   return null;
+}
+
+/* ---------- Memory threads ---------- */
+
+// Draws faint glowing arcs for the semantic edges of the graph (a memory
+// MENTIONS a person, memories RELATED_TO each other). Threads stay subtle so
+// the tree never turns into a cat's cradle; selecting either endpoint lights
+// its threads up and gives them a slow pulse.
+function MemoryThreads({
+  graph,
+  layout,
+  selectedId,
+}: {
+  graph: ForestGraph;
+  layout: ForestLayout;
+  selectedId: string | null;
+}) {
+  const threads = useMemo(() => {
+    const pos = new Map<string, Vec3>();
+    for (const p of layout.positioned) pos.set(p.node.id, p.position);
+    const out: { id: string; a: Vec3; b: Vec3; from: string; to: string }[] = [];
+    for (const e of graph.edges) {
+      if (e.kind !== "MENTIONS" && e.kind !== "RELATED_TO") continue;
+      const a = pos.get(e.fromNodeId);
+      const b = pos.get(e.toNodeId);
+      if (!a || !b) continue;
+      out.push({ id: e.id, a, b, from: e.fromNodeId, to: e.toNodeId });
+    }
+    return out;
+  }, [graph, layout]);
+
+  if (!threads.length) return null;
+
+  return (
+    <>
+      {threads.map((t) => (
+        <Thread
+          key={t.id}
+          a={t.a}
+          b={t.b}
+          active={selectedId === t.from || selectedId === t.to}
+          dimmed={!!selectedId}
+        />
+      ))}
+    </>
+  );
+}
+
+function Thread({
+  a,
+  b,
+  active,
+  dimmed,
+}: {
+  a: Vec3;
+  b: Vec3;
+  active: boolean;
+  dimmed: boolean;
+}) {
+  const matRef = useRef<THREE.MeshBasicMaterial>(null);
+
+  const geometry = useMemo(() => {
+    const start = new THREE.Vector3(a[0], a[1], a[2]);
+    const end = new THREE.Vector3(b[0], b[1], b[2]);
+    const dist = start.distanceTo(end);
+    const mid = start.clone().add(end).multiplyScalar(0.5);
+    // Bow the thread upward so it reads as a light bridge, not a taut wire.
+    mid.y += 0.25 + dist * 0.18;
+    const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+    return new THREE.TubeGeometry(curve, 32, 0.013, 6, false);
+  }, [a, b]);
+
+  useLayoutEffect(() => {
+    return () => geometry.dispose();
+  }, [geometry]);
+
+  useFrame((state) => {
+    if (!matRef.current) return;
+    const base = active ? 0.7 : dimmed ? 0.07 : 0.22;
+    const pulse = active ? 0.22 * (0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 3)) : 0;
+    matRef.current.opacity = base + pulse;
+  });
+
+  return (
+    <mesh geometry={geometry}>
+      <meshBasicMaterial
+        ref={matRef}
+        color={active ? "#ffe6a8" : "#e8c98d"}
+        transparent
+        opacity={0.22}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
 }
 
 /* ---------- Canopy ---------- */
