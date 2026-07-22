@@ -8,10 +8,12 @@ export default async function Home() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 text-center">
-      <p className="mb-4 text-sm uppercase tracking-[0.3em] text-canopy-light">Everroot</p>
-      <h1 className="mb-6 font-serif text-5xl leading-tight text-parchment md:text-6xl">
-        The Living Legacy Forest
-      </h1>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/everroot-logo-transparent.png"
+        alt="EverRoot — the living legacy forest"
+        className="mb-8 w-[320px] max-w-full drop-shadow-[0_4px_24px_rgba(0,0,0,0.5)] md:w-[420px]"
+      />
       <p className="mb-10 max-w-xl text-lg text-parchment/80">
         Preserve your family&apos;s history before it&apos;s gone. Every person begins as a
         seed. Every story grows a tree. Every family becomes a forest that future

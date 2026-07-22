@@ -33,3 +33,7 @@ yarn-error.log*
 
 # logs
 *.log
+
+# stray imported files
+/App Idea Feedback.html
+/App Idea Feedback_files/

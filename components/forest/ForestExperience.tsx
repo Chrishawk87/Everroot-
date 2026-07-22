@@ -121,7 +121,12 @@ export default function ForestExperience({ graph }: { graph: ForestGraph }) {
 
       {/* Top-left: whose forest + growth stage. */}
       <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans">
-        <p className="text-xs uppercase tracking-[0.25em] text-canopy-light">Everroot</p>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/everroot-logo-transparent.png"
+          alt="EverRoot"
+          className="mb-2 h-14 w-auto drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)]"
+        />
         <h1 className="font-serif text-2xl text-parchment">
           {graph.profile.displayName}
           {graph.profile.familyPosition ? (
