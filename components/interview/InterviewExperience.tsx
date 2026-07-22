@@ -11,6 +11,14 @@ import { ACKNOWLEDGMENTS, FOLLOW_UPS, PATIENCE_LINES } from "@/lib/interview/per
 
 type Phase = "intro" | "idle" | "recording" | "review" | "saving" | "done";
 
+// Common ways to say who someone is to you — offered as quick suggestions;
+// people can also type their own.
+const RELATIONSHIP_OPTIONS = [
+  "Mother", "Father", "Brother", "Sister", "Son", "Daughter",
+  "Grandmother", "Grandfather", "Wife", "Husband", "Partner",
+  "Aunt", "Uncle", "Cousin", "Friend",
+];
+
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
@@ -50,6 +58,7 @@ export default function InterviewExperience({
   );
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [newName, setNewName] = useState("");
+  const [newRel, setNewRel] = useState("");
   const keyOf = (p: Person) => p.id ?? `new:${p.name.toLowerCase()}`;
 
   const togglePerson = useCallback((p: Person) => {
@@ -65,19 +74,25 @@ export default function InterviewExperience({
   const addPerson = useCallback(() => {
     const name = newName.trim();
     if (!name) return;
+    const rel = newRel.trim();
     setNewName("");
+    setNewRel("");
     setRoster((prev) => {
       const existing = prev.find((r) => r.name.toLowerCase() === name.toLowerCase());
       if (existing) {
         const k = existing.id ?? `new:${existing.name.toLowerCase()}`;
         setSelectedKeys((s) => new Set(s).add(k));
+        // Fill in a relationship if we didn't have one yet.
+        if (rel && !existing.relationship) {
+          return prev.map((r) => (r === existing ? { ...r, relationship: rel } : r));
+        }
         return prev;
       }
-      const added: Person = { id: null, name, relationship: null };
+      const added: Person = { id: null, name, relationship: rel || null };
       setSelectedKeys((s) => new Set(s).add(`new:${name.toLowerCase()}`));
       return [...prev, added];
     });
-  }, [newName]);
+  }, [newName, newRel]);
 
   const [canRecognize, setCanRecognize] = useState(false);
   const [canRecordAudio, setCanRecordAudio] = useState(false);
@@ -366,6 +381,7 @@ export default function InterviewExperience({
     setHasRecorded(false);
     setSelectedKeys(new Set());
     setNewName("");
+    setNewRel("");
   }, [hardStopRecording]);
 
   const pickAck = useCallback(() => {
@@ -629,7 +645,7 @@ export default function InterviewExperience({
                     })}
                   </div>
                 ) : null}
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   <input
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
@@ -640,8 +656,26 @@ export default function InterviewExperience({
                       }
                     }}
                     placeholder="Add someone by name…"
-                    className="flex-1 rounded-full border border-parchment/15 bg-black/30 px-4 py-1.5 text-sm text-parchment outline-none transition focus:border-canopy-light"
+                    className="min-w-[10rem] flex-1 rounded-full border border-parchment/15 bg-black/30 px-4 py-1.5 text-sm text-parchment outline-none transition focus:border-canopy-light"
                   />
+                  <input
+                    value={newRel}
+                    onChange={(e) => setNewRel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addPerson();
+                      }
+                    }}
+                    list="everroot-relationships"
+                    placeholder="Who are they to you?"
+                    className="min-w-[9rem] flex-1 rounded-full border border-parchment/15 bg-black/30 px-4 py-1.5 text-sm text-parchment outline-none transition focus:border-canopy-light"
+                  />
+                  <datalist id="everroot-relationships">
+                    {RELATIONSHIP_OPTIONS.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
                   <button
                     type="button"
                     onClick={addPerson}

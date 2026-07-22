@@ -304,13 +304,13 @@ function MemoryThreads({
   const threads = useMemo(() => {
     const pos = new Map<string, Vec3>();
     for (const p of layout.positioned) pos.set(p.node.id, p.position);
-    const out: { id: string; a: Vec3; b: Vec3; from: string; to: string }[] = [];
+    const out: { id: string; a: Vec3; b: Vec3; from: string; to: string; kind: string }[] = [];
     for (const e of graph.edges) {
-      if (e.kind !== "MENTIONS" && e.kind !== "RELATED_TO") continue;
+      if (e.kind !== "MENTIONS" && e.kind !== "RELATED_TO" && e.kind !== "FAMILY") continue;
       const a = pos.get(e.fromNodeId);
       const b = pos.get(e.toNodeId);
       if (!a || !b) continue;
-      out.push({ id: e.id, a, b, from: e.fromNodeId, to: e.toNodeId });
+      out.push({ id: e.id, a, b, from: e.fromNodeId, to: e.toNodeId, kind: e.kind });
     }
     return out;
   }, [graph, layout]);
@@ -324,6 +324,7 @@ function MemoryThreads({
           key={t.id}
           a={t.a}
           b={t.b}
+          kind={t.kind}
           active={selectedId === t.from || selectedId === t.to}
           dimmed={!!selectedId}
         />
@@ -332,14 +333,23 @@ function MemoryThreads({
   );
 }
 
+// Family/root threads glow living-green; memory mentions glow warm gold.
+const THREAD_COLORS: Record<string, { base: string; active: string }> = {
+  FAMILY: { base: "#7fd6b4", active: "#c4f5e0" },
+  MENTIONS: { base: "#e8c98d", active: "#ffe6a8" },
+  RELATED_TO: { base: "#e8c98d", active: "#ffe6a8" },
+};
+
 function Thread({
   a,
   b,
+  kind,
   active,
   dimmed,
 }: {
   a: Vec3;
   b: Vec3;
+  kind: string;
   active: boolean;
   dimmed: boolean;
 }) {
@@ -350,8 +360,10 @@ function Thread({
     const end = new THREE.Vector3(b[0], b[1], b[2]);
     const dist = start.distanceTo(end);
     const mid = start.clone().add(end).multiplyScalar(0.5);
-    // Bow the thread upward so it reads as a light bridge, not a taut wire.
-    mid.y += 0.25 + dist * 0.18;
+    // Underground threads sag downward like roots; above-ground ones bow up
+    // like a light bridge. Decide by where the thread mostly lives.
+    if (mid.y < 0.3) mid.y -= 0.2 + dist * 0.14;
+    else mid.y += 0.25 + dist * 0.18;
     const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
     return new THREE.TubeGeometry(curve, 32, 0.013, 6, false);
   }, [a, b]);
@@ -362,18 +374,20 @@ function Thread({
 
   useFrame((state) => {
     if (!matRef.current) return;
-    const base = active ? 0.7 : dimmed ? 0.07 : 0.22;
+    const base = active ? 0.7 : dimmed ? 0.08 : 0.26;
     const pulse = active ? 0.22 * (0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 3)) : 0;
     matRef.current.opacity = base + pulse;
   });
+
+  const palette = THREAD_COLORS[kind] ?? THREAD_COLORS.MENTIONS;
 
   return (
     <mesh geometry={geometry}>
       <meshBasicMaterial
         ref={matRef}
-        color={active ? "#ffe6a8" : "#e8c98d"}
+        color={active ? palette.active : palette.base}
         transparent
-        opacity={0.22}
+        opacity={0.26}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
         toneMapped={false}
@@ -545,10 +559,28 @@ function Trunk({
 
 function Ground({ grass }: { grass: THREE.CanvasTexture }) {
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <circleGeometry args={[60, 64]} />
-      <meshStandardMaterial map={grass} color="#6f9a58" roughness={1} />
-    </mesh>
+    <group>
+      {/* Dark soil backdrop — gives the underground volume depth so the family
+          root network reads as being *in* the earth. Opaque, sits below. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.4, 0]}>
+        <circleGeometry args={[60, 64]} />
+        <meshStandardMaterial color="#241a12" roughness={1} />
+      </mesh>
+      {/* Grass surface — slightly see-through so the glowing roots beneath show
+          faintly, like roots through soil at dusk. Drawn without depth-write so
+          it never hard-occludes the network below it. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+        <circleGeometry args={[60, 64]} />
+        <meshStandardMaterial
+          map={grass}
+          color="#6f9a58"
+          roughness={1}
+          transparent
+          opacity={0.72}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -761,15 +793,29 @@ function Geometry({
         </mesh>
       );
     case "PERSON":
+      // A family member: a glowing node in the underground root network — the
+      // seed of their own tree, waiting to grow.
       return (
         <group>
-          <mesh position={[0, scale * 0.35, 0]} castShadow>
-            <coneGeometry args={[scale * 0.7, scale * 1.2, 8]} />
-            <meshStandardMaterial color={color} roughness={0.7} emissive={emissive} emissiveIntensity={baseGlow} />
+          <mesh>
+            <sphereGeometry args={[scale, 18, 18]} />
+            <meshStandardMaterial
+              color={color}
+              roughness={0.35}
+              emissive={emissive}
+              emissiveIntensity={glow ? 1.0 : 0.75}
+            />
           </mesh>
-          <mesh position={[0, -scale * 0.4, 0]}>
-            <cylinderGeometry args={[scale * 0.12, scale * 0.12, scale * 0.6, 6]} />
-            <meshStandardMaterial color="#5b3a29" />
+          {/* Soft halo so the node reads through the soil. */}
+          <mesh>
+            <sphereGeometry args={[scale * 1.7, 16, 16]} />
+            <meshBasicMaterial
+              color={color}
+              transparent
+              opacity={0.16}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
           </mesh>
         </group>
       );

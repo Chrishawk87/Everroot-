@@ -126,13 +126,17 @@ export function computeLayout(graph: ForestGraph): ForestLayout {
     limbs.push({ from: [0, 0, 0], to: pos, kind: "root" });
   });
 
-  // Family members appear as saplings ringed around the base.
+  // Family members live UNDERGROUND as glowing nodes in the root network —
+  // each one a seed for their own future tree. They fan out and down from the
+  // base at organic depths/distances so the roots read as a living web, not a
+  // ring. A soft root "limb" ties each back to the base of the trunk.
   const people = seed ? childrenOf.get(seed.id)?.filter((c) => c.kind === "PERSON") ?? [] : [];
   people.forEach((person, i) => {
-    const angle = i * GOLDEN_ANGLE;
-    const r = 2.6 + hash01(person.id, 4) * 1.2;
-    const pos: Vec3 = [Math.cos(angle) * r, 0.4, Math.sin(angle) * r];
-    positioned.push({ node: person, position: pos, scale: 0.5, parentId: seed!.id });
+    const angle = i * GOLDEN_ANGLE + hash01(person.id, 4) * 0.7;
+    const r = 1.5 + hash01(person.id, 8) * 1.9;
+    const depth = 0.55 + hash01(person.id, 6) * 1.1;
+    const pos: Vec3 = [Math.cos(angle) * r, -depth, Math.sin(angle) * r];
+    positioned.push({ node: person, position: pos, scale: 0.34, parentId: seed!.id });
   });
 
   return { trunkHeight, positioned, limbs };
