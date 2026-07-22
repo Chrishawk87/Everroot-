@@ -11,6 +11,7 @@ import InviteButton from "./InviteButton";
 import ShareClipButton, { isClipKind } from "./ShareClipButton";
 import StoryFeedPlayer from "./StoryFeedPlayer";
 import CapsulePanel from "./CapsulePanel";
+import GuardianPanel, { type FamilyOption } from "./GuardianPanel";
 import { signOutAction } from "@/app/actions/forest";
 
 // three.js only runs in the browser — load the canvas without SSR.
@@ -47,7 +48,15 @@ const GREW_VERB: Record<string, string> = {
   SEED: "A seed was planted",
 };
 
-export default function ForestExperience({ graph, ownerId }: { graph: ForestGraph; ownerId: string }) {
+export default function ForestExperience({
+  graph,
+  ownerId,
+  guardianId = null,
+}: {
+  graph: ForestGraph;
+  ownerId: string;
+  guardianId?: string | null;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<ForestNodeDTO | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -113,9 +122,17 @@ export default function ForestExperience({ graph, ownerId }: { graph: ForestGrap
   const memoryCount =
     graph.counts.LEAF + graph.counts.FLOWER + graph.counts.FRUIT + graph.counts.MEMORY_MOMENT + graph.counts.PHOTO;
 
+  // Linked family who could serve as a guardian (PERSON nodes bound to a real account).
+  const familyOptions: FamilyOption[] = graph.nodes
+    .filter((n) => n.kind === "PERSON" && n.linkedUserId)
+    .map((n) => ({ userId: n.linkedUserId as string, name: n.title }));
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
-      <div className="absolute inset-0">
+      <div
+        className="absolute inset-0 transition-[filter] duration-1000"
+        style={graph.isMemorial ? { filter: "sepia(0.45) saturate(0.75) brightness(0.9)" } : undefined}
+      >
         <ForestCanvas
           graph={graph}
           selectedId={selected?.id ?? null}
@@ -123,6 +140,17 @@ export default function ForestExperience({ graph, ownerId }: { graph: ForestGrap
           onSelect={setSelected}
         />
       </div>
+
+      {/* Memorial banner. */}
+      {graph.isMemorial ? (
+        <div className="pointer-events-none absolute left-1/2 top-6 z-10 -translate-x-1/2 text-center font-serif">
+          <p className="text-xs uppercase tracking-[0.3em] text-parchment/60">In loving memory</p>
+          <p className="text-lg text-parchment/90">{graph.profile.displayName}</p>
+          {graph.memorialNote ? (
+            <p className="mt-1 max-w-md text-sm italic text-parchment/60">{graph.memorialNote}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Top-left: whose forest + growth stage. */}
       <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans">
@@ -248,6 +276,12 @@ export default function ForestExperience({ graph, ownerId }: { graph: ForestGrap
             Book of the Tree
           </Link>
           <CapsulePanel ownerId={ownerId} ownerName={graph.profile.displayName} isSelf />
+          <GuardianPanel
+            ownerId={ownerId}
+            isMemorial={graph.isMemorial}
+            currentGuardianId={guardianId}
+            family={familyOptions}
+          />
         </div>
         <div className="rounded-2xl border border-parchment/15 bg-black/70 backdrop-blur">
           <button

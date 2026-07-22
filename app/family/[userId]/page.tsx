@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getFamilyForest } from "@/lib/forest/queries";
+import { isGuardianOf } from "@/lib/guardianship";
 import ReadOnlyForest from "@/components/forest/ReadOnlyForest";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,14 @@ export default async function MemberForestPage({
   const member = family?.members.find((m) => m.userId === params.userId);
   if (!member) redirect("/family");
 
+  const isViewerGuardian = await isGuardianOf(session.user.id, member.userId);
+
   return (
-    <ReadOnlyForest graph={member.graph} relationship={member.relationship} ownerId={member.userId} />
+    <ReadOnlyForest
+      graph={member.graph}
+      relationship={member.relationship}
+      ownerId={member.userId}
+      isViewerGuardian={isViewerGuardian}
+    />
   );
 }

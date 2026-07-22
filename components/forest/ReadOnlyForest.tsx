@@ -8,6 +8,7 @@ import { GROWTH_STAGES } from "@/lib/forest/types";
 import ShareClipButton, { isClipKind } from "./ShareClipButton";
 import StoryFeedPlayer from "./StoryFeedPlayer";
 import CapsulePanel from "./CapsulePanel";
+import MemorialControls from "./MemorialControls";
 
 const ForestCanvas = dynamic(() => import("./ForestCanvas"), {
   ssr: false,
@@ -24,10 +25,12 @@ export default function ReadOnlyForest({
   graph,
   relationship,
   ownerId,
+  isViewerGuardian = false,
 }: {
   graph: ForestGraph;
   relationship: string | null;
   ownerId: string;
+  isViewerGuardian?: boolean;
 }) {
   const [selected, setSelected] = useState<ForestNodeDTO | null>(null);
   const stageMeta = GROWTH_STAGES.find((s) => s.stage === graph.stage);
@@ -36,9 +39,23 @@ export default function ReadOnlyForest({
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
-      <div className="absolute inset-0">
+      <div
+        className="absolute inset-0 transition-[filter] duration-1000"
+        style={graph.isMemorial ? { filter: "sepia(0.45) saturate(0.75) brightness(0.9)" } : undefined}
+      >
         <ForestCanvas graph={graph} selectedId={selected?.id ?? null} focusId={null} onSelect={setSelected} />
       </div>
+
+      {/* Memorial banner. */}
+      {graph.isMemorial ? (
+        <div className="pointer-events-none absolute left-1/2 top-6 z-10 -translate-x-1/2 text-center font-serif">
+          <p className="text-xs uppercase tracking-[0.3em] text-parchment/60">In loving memory</p>
+          <p className="text-lg text-parchment/90">{graph.profile.displayName}</p>
+          {graph.memorialNote ? (
+            <p className="mt-1 max-w-md text-sm italic text-parchment/60">{graph.memorialNote}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Whose tree this is */}
       <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans">
@@ -68,6 +85,12 @@ export default function ReadOnlyForest({
             Book of the Tree
           </Link>
           <CapsulePanel ownerId={ownerId} ownerName={graph.profile.displayName} />
+          <MemorialControls
+            ownerId={ownerId}
+            ownerName={graph.profile.displayName}
+            isMemorial={graph.isMemorial}
+            isViewerGuardian={isViewerGuardian}
+          />
         </div>
       </div>
 

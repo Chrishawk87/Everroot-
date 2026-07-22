@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getForest } from "@/lib/forest/queries";
+import { getGuardianId } from "@/lib/guardianship";
 import ForestExperience from "@/components/forest/ForestExperience";
 
 // The Forest is the application. After authentication the user enters directly
@@ -17,5 +18,7 @@ export default async function ForestPage() {
     redirect("/signup");
   }
 
-  return <ForestExperience graph={graph} ownerId={session.user.id} />;
+  const guardianId = await getGuardianId(session.user.id);
+
+  return <ForestExperience graph={graph} ownerId={session.user.id} guardianId={guardianId} />;
 }

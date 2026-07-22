@@ -36,7 +36,46 @@ model User {
   // Sealed messages this user has left for the future.
   timeCapsules TimeCapsule[] @relation("UserCapsules")
 
+  // A guardian this user has appointed to help steward their forest.
+  guardianedBy Guardian?    @relation("OwnerGuardian")
+  // Forests this user stewards on behalf of others.
+  guardianFor  Guardian[]   @relation("GuardianFor")
+  // Present when this user's forest has been turned into a memorial.
+  memorial     Memorial?    @relation("OwnerMemorial")
+
   @@map("users")
+}
+
+// A guardian is a linked family member appointed to help steward another
+// person's forest — adding or editing memories on their behalf, and (with
+// confirmation) turning the forest into a memorial. Each forest has at most one
+// guardian, so ownerId is unique.
+model Guardian {
+  id         String   @id @default(cuid())
+  ownerId    String   @unique
+  guardianId String
+  createdAt  DateTime @default(now())
+
+  owner      User     @relation("OwnerGuardian", fields: [ownerId], references: [id], onDelete: Cascade)
+  guardian   User     @relation("GuardianFor", fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@index([guardianId])
+  @@map("guardians")
+}
+
+// Marks a forest as a memorial. The row's mere presence flips memorial mode on;
+// deleting it turns it back off. Once memorial, linked family can leave tributes
+// and the tree keeps growing as a shared remembrance.
+model Memorial {
+  id        String   @id @default(cuid())
+  ownerId   String   @unique
+  // Optional short note shown on the memorial banner.
+  note      String?
+  createdAt DateTime @default(now())
+
+  owner     User     @relation("OwnerMemorial", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("memorials")
 }
 
 // A message sealed until a future date — "open on your 18th birthday", "read

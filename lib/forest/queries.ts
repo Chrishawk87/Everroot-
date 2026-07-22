@@ -4,6 +4,7 @@ import type { NodeKind, LifeEpoch } from "@prisma/client";
 import { findForwardLinks, findReverseLinks, linkedUserIdOf, isLinkedFamily } from "@/lib/family-links";
 import { findRecordingForNode, listRecordingsForUser, type RecordingMeta } from "@/lib/recordings";
 import { listCapsulesForUser } from "@/lib/time-capsules";
+import { getMemorial } from "@/lib/guardianship";
 
 const ALL_KINDS: NodeKind[] = [
   "SEED", "ROOT", "TRUNK", "BRANCH", "SUB_BRANCH", "LEAF", "FLOWER",
@@ -19,13 +20,14 @@ function emptyCounts(): Record<NodeKind, number> {
 
 /** Load the entire forest for a user. The renderer builds itself from this. */
 export async function getForest(userId: string): Promise<ForestGraph | null> {
-  const [profile, nodes, edges] = await Promise.all([
+  const [profile, nodes, edges, memorial] = await Promise.all([
     prisma.profile.findUnique({ where: { userId } }),
     prisma.forestNode.findMany({
       where: { userId },
       orderBy: { createdAt: "asc" },
     }),
     prisma.forestEdge.findMany({ where: { userId } }),
+    getMemorial(userId),
   ]);
 
   if (!profile) return null;
@@ -68,6 +70,8 @@ export async function getForest(userId: string): Promise<ForestGraph | null> {
     legacyScore,
     stage: stageForScore(legacyScore),
     counts,
+    isMemorial: memorial != null,
+    memorialNote: memorial?.note ?? null,
   };
 }
 

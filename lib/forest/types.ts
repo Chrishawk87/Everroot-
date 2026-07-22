@@ -36,6 +36,10 @@ export interface ForestGraph {
   legacyScore: number;
   stage: GrowthStage;
   counts: Record<NodeKind, number>;
+  /** True once this forest has been turned into a memorial. */
+  isMemorial: boolean;
+  /** Optional note shown on the memorial banner. */
+  memorialNote: string | null;
 }
 
 // The tree's visible growth stage, derived from the legacy score.
