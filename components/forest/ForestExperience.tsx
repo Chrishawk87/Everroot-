@@ -141,7 +141,7 @@ export default function ForestExperience({
 
       {/* Memorial banner. */}
       {graph.isMemorial ? (
-        <div className="pointer-events-none absolute left-1/2 top-6 z-10 -translate-x-1/2 text-center font-serif">
+        <div className="pointer-events-none absolute left-1/2 top-6 z-10 -translate-x-1/2 text-center font-serif [text-shadow:0_1px_8px_rgba(0,0,0,0.9)]">
           <p className="text-xs uppercase tracking-[0.3em] text-parchment/60">In loving memory</p>
           <p className="text-lg text-parchment/90">{graph.profile.displayName}</p>
           {graph.memorialNote ? (
@@ -151,7 +151,7 @@ export default function ForestExperience({
       ) : null}
 
       {/* Top-left: whose forest + growth stage. */}
-      <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans">
+      <div className="pointer-events-none absolute left-5 top-5 max-w-xs font-sans [text-shadow:0_1px_8px_rgba(0,0,0,0.9)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/everroot-logo-transparent.png"

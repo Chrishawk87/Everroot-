@@ -141,8 +141,11 @@ const CYCLE_COLORS = DAY_CYCLE.map((k) => ({
   dir: new THREE.Color(k.dir.color),
 }));
 
-const CYCLE_PERIOD = 160; // seconds for a full day
-const CYCLE_START = 0.32; // begin mid-day so visitors land in daylight
+// Day/night follows the visitor's real local clock: midnight = 0, noon = 0.5.
+function realTimePhase() {
+  const now = new Date();
+  return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
+}
 
 // The nine interview branches each carry their own light. Memory leaves inherit
 // their branch's color and glow a little brighter so the tree reads as chapters
@@ -166,11 +169,11 @@ const MEMORY_KINDS = new Set(["LEAF", "FLOWER", "FRUIT", "PHOTO", "MEMORY", "MEM
 // Crown fullness by growth stage: radius + decorative leaf count.
 const CROWN: Record<GrowthStage, { r: number; count: number }> = {
   SEED: { r: 0, count: 0 },
-  SPROUT: { r: 0.55, count: 160 },
-  SAPLING: { r: 1.15, count: 700 },
-  YOUNG_TREE: { r: 1.9, count: 2000 },
-  MATURE_TREE: { r: 2.6, count: 4200 },
-  ANCIENT_TREE: { r: 3.3, count: 6500 },
+  SPROUT: { r: 0.55, count: 45 },
+  SAPLING: { r: 1.15, count: 180 },
+  YOUNG_TREE: { r: 1.9, count: 480 },
+  MATURE_TREE: { r: 2.6, count: 950 },
+  ANCIENT_TREE: { r: 3.3, count: 1450 },
 };
 const STAGE_INDEX: Record<GrowthStage, number> = {
   SEED: 0, SPROUT: 1, SAPLING: 2, YOUNG_TREE: 3, MATURE_TREE: 4, ANCIENT_TREE: 5,
@@ -549,22 +552,24 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
 // A field of individual instanced blades around the base of the tree, each
 // leaning slightly and swaying in the same wind that moves the canopy. Fades
 // out with distance so the edge blends into the textured ground plane.
-function GrassField({ count = 10000, inner = 1.2, outer = 22 }: { count?: number; inner?: number; outer?: number }) {
+// Short blade so the grass carpets the ground rather than standing tall.
+const BLADE_H = 0.26;
+function GrassField({ count = 20000, inner = 0.5, outer = 24 }: { count?: number; inner?: number; outer?: number }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const shaderRef = useRef<{ uniforms: { uTime: { value: number } } } | null>(null);
 
   // A single tapered blade: a narrow triangle-ish quad that bends toward the tip.
   const geometry = useMemo(() => {
-    const g = new THREE.PlaneGeometry(0.06, 0.6, 1, 4);
-    g.translate(0, 0.3, 0); // pivot at the root
+    const g = new THREE.PlaneGeometry(0.05, BLADE_H, 1, 4);
+    g.translate(0, BLADE_H / 2, 0); // pivot at the root
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
-      const t = y / 0.6;
+      const t = y / BLADE_H;
       // Taper to a point and curl forward toward the tip.
       pos.setX(i, pos.getX(i) * (1 - t * 0.85));
-      pos.setZ(i, pos.getZ(i) + t * t * 0.12);
+      pos.setZ(i, pos.getZ(i) + t * t * 0.06);
     }
     pos.needsUpdate = true;
     g.computeVertexNormals();
@@ -616,11 +621,11 @@ function GrassField({ count = 10000, inner = 1.2, outer = 22 }: { count?: number
           "#include <begin_vertex>",
           `#include <begin_vertex>
            #ifdef USE_INSTANCING
-           float bladeH = clamp(position.y / 0.6, 0.0, 1.0);
+           float bladeH = clamp(position.y / 0.26, 0.0, 1.0);
            float ph = instanceMatrix[3].x * 1.3 + instanceMatrix[3].z * 0.7;
-           float sway = sin(uTime * 1.6 + ph) * 0.10 + sin(uTime * 0.7 + ph * 1.7) * 0.05;
+           float sway = sin(uTime * 1.6 + ph) * 0.05 + sin(uTime * 0.7 + ph * 1.7) * 0.025;
            transformed.x += sway * bladeH * bladeH;
-           transformed.z += cos(uTime * 1.2 + ph) * 0.05 * bladeH * bladeH;
+           transformed.z += cos(uTime * 1.2 + ph) * 0.025 * bladeH * bladeH;
            #endif`,
         );
       shaderRef.current = shader as unknown as { uniforms: { uTime: { value: number } } };
@@ -1072,12 +1077,12 @@ function SceneClock({
   const { scene } = useThree();
   const lerp = THREE.MathUtils.lerp;
 
-  useFrame((state) => {
+  useFrame(() => {
     if (!enabled) {
       nightRef.current = 0.6;
       return;
     }
-    const phase = (state.clock.elapsedTime / CYCLE_PERIOD + CYCLE_START) % 1;
+    const phase = realTimePhase();
     let i = 0;
     for (let k = 0; k < DAY_CYCLE.length - 1; k++) {
       if (phase >= DAY_CYCLE[k].at && phase < DAY_CYCLE[k + 1].at) {
@@ -1473,10 +1478,10 @@ function Geometry({
         </mesh>
       );
     default:
+      // Every other memory kind reads as a glowing leaf — no diamonds.
       return (
-        <mesh castShadow>
-          <octahedronGeometry args={[scale, 0]} />
-          <meshStandardMaterial color={color} roughness={0.6} emissive={emissive} emissiveIntensity={baseGlow} />
+        <mesh geometry={LEAF_MEMORY_GEOMETRY} scale={scale * 4} rotation={[-0.5, seed * Math.PI * 2, seed * 0.6 - 0.3]} castShadow>
+          <meshStandardMaterial map={leafTex} alphaTest={0.4} side={THREE.DoubleSide} roughness={0.5} emissive={emissive} emissiveIntensity={baseGlow} emissiveMap={leafTex} />
         </mesh>
       );
   }
