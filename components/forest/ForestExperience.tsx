@@ -243,8 +243,8 @@ export default function ForestExperience({
         <ForestIntro displayName={graph.profile.displayName} onComplete={completeIntro} />
       ) : null}
 
-      {/* Growth panel. */}
-      <div className="absolute bottom-5 right-5 w-80 max-w-[90vw] font-sans">
+      {/* Growth panel. Capped + scrollable so it never buries the forest on a phone. */}
+      <div className="absolute bottom-5 right-5 max-h-[70vh] w-80 max-w-[90vw] overflow-y-auto font-sans [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {/* Primary action — the voice life interview. */}
         <Link
           href="/interview"

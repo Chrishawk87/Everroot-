@@ -432,10 +432,19 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
   const dirRef = useRef<THREE.DirectionalLight>(null);
   const skyRef = useRef<React.ElementRef<typeof Sky>>(null);
 
+  // Frame the tall tree well on portrait phones (pull back + slightly wider lens),
+  // tighter and more cinematic on landscape/desktop.
+  const isPortrait = typeof window !== "undefined" && window.innerHeight >= window.innerWidth;
+  const camInit = isPortrait
+    ? { position: [4.5, 4.4, 11.5] as Vec3, fov: 55 }
+    : { position: [6, 3.6, 8] as Vec3, fov: 48 };
+
   return (
     <Canvas
       shadows
-      camera={{ position: [6, 3.6, 8], fov: 48 }}
+      dpr={[1, 2]}
+      performance={{ min: 0.5 }}
+      camera={camInit}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       onPointerMissed={() => onSelect(null)}
     >
@@ -460,6 +469,9 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
         shadow-camera-top={12}
         shadow-camera-bottom={-4}
       />
+      {/* Soft warm rim light from behind: lifts the tree's silhouette off the
+          sky for depth. No shadow — purely cinematic separation. */}
+      <directionalLight position={[-8, 6, -9]} intensity={0.5} color="#ffd9a8" />
 
       {/* The day-cycle drives all of the above; memorial forests hold at dusk. */}
       <SceneClock
@@ -527,10 +539,17 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
 
       <OrbitControls
         makeDefault
-        enablePan
+        enablePan={false}
         enableZoom
+        enableDamping
+        dampingFactor={0.08}
+        rotateSpeed={0.55}
+        zoomSpeed={0.8}
+        autoRotate={!focusPos}
+        autoRotateSpeed={0.28}
         minDistance={2.5}
         maxDistance={30}
+        minPolarAngle={0.25}
         maxPolarAngle={Math.PI / 2.05}
         target={[0, layout.trunkHeight * 0.55, 0]}
       />
