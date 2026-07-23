@@ -2,7 +2,8 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Html, Sky } from "@react-three/drei";
+import { OrbitControls, Html, Sky, Environment, Lightformer } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette, SMAA } from "@react-three/postprocessing";
 import * as THREE from "three";
 import type { ForestGraph, ForestNodeDTO, GrowthStage } from "@/lib/forest/types";
 import { computeLayout, type PositionedNode, type Vec3, type Limb, type ForestLayout } from "@/lib/forest/layout";
@@ -20,6 +21,11 @@ const COLORS: Record<string, string> = {
 };
 
 const HIDDEN = new Set(["TIMELINE_EVENT", "RELATIONSHIP", "SUB_BRANCH"]);
+
+// Normal-map strengths (three expects a Vector2, not an array literal).
+const BARK_NORMAL_SCALE = new THREE.Vector2(0.7, 0.7);
+const TRUNK_NORMAL_SCALE = new THREE.Vector2(0.85, 0.85);
+const GROUND_NORMAL_SCALE = new THREE.Vector2(0.6, 0.6);
 const SUN_POSITION: Vec3 = [-28, 30, -18];
 // A memorial forest is lit at dusk: the sun rests low on the horizon, casting a
 // long amber light that fades to a deep twilight blue overhead — a quiet, elegiac
@@ -218,50 +224,99 @@ function makeLeafTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function makeBarkTexture(): { map: THREE.CanvasTexture; bump: THREE.CanvasTexture } {
-  const w = 256;
-  const h = 512;
+// Converts a grayscale height canvas into a tangent-space normal map so surface
+// detail catches the moving light believably (real bark ridges, not a flat decal).
+function heightToNormal(height: HTMLCanvasElement, strength = 2.2): HTMLCanvasElement {
+  const w = height.width;
+  const h = height.height;
+  const src = height.getContext("2d")!.getImageData(0, 0, w, h).data;
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const dst = out.getContext("2d")!.createImageData(w, h);
+  const at = (xx: number, yy: number) => {
+    const cx = (xx + w) % w;
+    const cy = (yy + h) % h;
+    return src[(cy * w + cx) * 4] / 255;
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x - 1, y) - at(x + 1, y)) * strength;
+      const dy = (at(x, y - 1) - at(x, y + 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      dst.data[i] = ((dx / len) * 0.5 + 0.5) * 255;
+      dst.data[i + 1] = ((dy / len) * 0.5 + 0.5) * 255;
+      dst.data[i + 2] = (1 / len) * 255;
+      dst.data[i + 3] = 255;
+    }
+  }
+  out.getContext("2d")!.putImageData(dst, 0, 0);
+  return out;
+}
+
+function makeBarkTexture(): { map: THREE.CanvasTexture; normal: THREE.CanvasTexture } {
+  const w = 512;
+  const h = 1024;
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const x = c.getContext("2d")!;
-  x.fillStyle = "#5b3f2a";
+  // Base gradient so the bark isn't a flat brown fill.
+  const bg = x.createLinearGradient(0, 0, w, 0);
+  bg.addColorStop(0, "#4a3320");
+  bg.addColorStop(0.5, "#63472e");
+  bg.addColorStop(1, "#4f3924");
+  x.fillStyle = bg;
   x.fillRect(0, 0, w, h);
-  const bc = document.createElement("canvas");
-  bc.width = w;
-  bc.height = h;
-  const bx = bc.getContext("2d")!;
-  bx.fillStyle = "#808080";
-  bx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 240; i++) {
+  // Mottled patches for age and moss hints.
+  for (let i = 0; i < 900; i++) {
+    const r = 6 + Math.random() * 40;
+    const g = Math.random() < 0.15;
+    x.fillStyle = g
+      ? `rgba(70,88,52,${0.03 + Math.random() * 0.05})`
+      : `rgba(${30 + Math.random() * 40},${20 + Math.random() * 26},${12 + Math.random() * 16},${0.05 + Math.random() * 0.08})`;
+    x.beginPath();
+    x.arc(Math.random() * w, Math.random() * h, r, 0, Math.PI * 2);
+    x.fill();
+  }
+  const hc = document.createElement("canvas");
+  hc.width = w;
+  hc.height = h;
+  const hx = hc.getContext("2d")!;
+  hx.fillStyle = "#808080";
+  hx.fillRect(0, 0, w, h);
+  // Long vertical furrows: paired dark (color) + height strokes.
+  for (let i = 0; i < 520; i++) {
     const px = Math.random() * w;
     const py = Math.random() * h;
-    const len = 50 + Math.random() * 240;
+    const len = 80 + Math.random() * 420;
     const dark = Math.random() < 0.55;
-    const a = 0.12 + Math.random() * 0.3;
-    const lw = 1 + Math.random() * 3.5;
-    const cx = (Math.random() - 0.5) * 8;
-    x.strokeStyle = dark ? `rgba(38,24,14,${a})` : `rgba(120,90,60,${a})`;
+    const a = 0.12 + Math.random() * 0.32;
+    const lw = 1 + Math.random() * 5;
+    const cx = (Math.random() - 0.5) * 12;
+    x.strokeStyle = dark ? `rgba(28,18,10,${a})` : `rgba(132,100,66,${a})`;
     x.lineWidth = lw;
     x.beginPath();
     x.moveTo(px, py);
     x.bezierCurveTo(px + cx, py + len * 0.5, px + cx, py + len, px + cx * 0.6, py + len);
     x.stroke();
-    bx.strokeStyle = dark ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`;
-    bx.lineWidth = lw;
-    bx.beginPath();
-    bx.moveTo(px, py);
-    bx.bezierCurveTo(px + cx, py + len * 0.5, px + cx, py + len, px + cx * 0.6, py + len);
-    bx.stroke();
+    hx.strokeStyle = dark ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`;
+    hx.lineWidth = lw;
+    hx.beginPath();
+    hx.moveTo(px, py);
+    hx.bezierCurveTo(px + cx, py + len * 0.5, px + cx, py + len, px + cx * 0.6, py + len);
+    hx.stroke();
   }
   const map = new THREE.CanvasTexture(c);
   map.colorSpace = THREE.SRGBColorSpace;
   map.wrapS = map.wrapT = THREE.RepeatWrapping;
   map.repeat.set(1.5, 3);
-  const bump = new THREE.CanvasTexture(bc);
-  bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
-  bump.repeat.set(1.5, 3);
-  return { map, bump };
+  map.anisotropy = 8;
+  const normal = new THREE.CanvasTexture(heightToNormal(hc, 2.6));
+  normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
+  normal.repeat.set(1.5, 3);
+  return { map, normal };
 }
 
 function makeGrassTexture(): THREE.CanvasTexture {
@@ -278,6 +333,29 @@ function makeGrassTexture(): THREE.CanvasTexture {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(24, 24);
+  return tex;
+}
+
+// A soft, tileable noise normal map so the ground plane catches light with a
+// little organic unevenness instead of reading as glass-flat.
+function makeGroundNormal(): THREE.CanvasTexture {
+  const s = 256;
+  const hc = document.createElement("canvas");
+  hc.width = s;
+  hc.height = s;
+  const hx = hc.getContext("2d")!;
+  hx.fillStyle = "#808080";
+  hx.fillRect(0, 0, s, s);
+  for (let i = 0; i < 2600; i++) {
+    const g = 90 + Math.random() * 110;
+    hx.fillStyle = `rgba(${g},${g},${g},0.5)`;
+    hx.beginPath();
+    hx.arc(Math.random() * s, Math.random() * s, 1 + Math.random() * 4, 0, Math.PI * 2);
+    hx.fill();
+  }
+  const tex = new THREE.CanvasTexture(heightToNormal(hc, 1.6));
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(24, 24);
   return tex;
@@ -316,6 +394,7 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
   const bark = useMemo(makeBarkTexture, []);
   const leafTex = useMemo(makeLeafTexture, []);
   const grass = useMemo(makeGrassTexture, []);
+  const groundNormal = useMemo(makeGroundNormal, []);
   const shadowTex = useMemo(makeRadialShadow, []);
 
   const crown = CROWN[graph.stage];
@@ -397,8 +476,18 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
         onSelect={onSelect}
       />
 
+      {/* Image-based lighting: soft sky fill + a warm key + a ground bounce,
+          built entirely in-scene (no external HDRI files). Gives leaves, fruit
+          and bark realistic soft highlights and gentle reflections. */}
+      <Environment resolution={256} frames={1}>
+        <Lightformer intensity={0.7} color="#dfeaff" position={[0, 8, 0]} scale={[12, 12, 1]} form="ring" />
+        <Lightformer intensity={1.4} color="#fff0d6" position={[-6, 5, -5]} scale={[6, 6, 1]} />
+        <Lightformer intensity={0.35} color="#3d5230" position={[0, -6, 0]} scale={[14, 14, 1]} rotation={[Math.PI / 2, 0, 0]} />
+      </Environment>
+
       <Hills />
-      <Ground grass={grass} />
+      <Ground grass={grass} normal={groundNormal} />
+      <GrassField />
       {crown.r > 0 ? <CanopyShadow tex={shadowTex} center={crownCenter} radius={crown.r} /> : null}
       <Motes trunkHeight={layout.trunkHeight} color={atmo.motes.color} opacity={atmo.motes.opacity} nightRef={nightRef} />
 
@@ -443,7 +532,117 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
         target={[0, layout.trunkHeight * 0.55, 0]}
       />
       <CameraRig focusPos={focusPos} />
+
+      {/* Cinematic pass: bloom lifts the glowing memories, stars and low sun;
+          SMAA cleans edges; a soft vignette focuses the eye on the tree. */}
+      <EffectComposer multisampling={0} enableNormalPass={false}>
+        <Bloom mipmapBlur luminanceThreshold={0.72} luminanceSmoothing={0.28} intensity={0.7} radius={0.7} />
+        <SMAA />
+        <Vignette offset={0.28} darkness={0.62} eskil={false} />
+      </EffectComposer>
     </Canvas>
+  );
+}
+
+/* ---------- Grass ---------- */
+
+// A field of individual instanced blades around the base of the tree, each
+// leaning slightly and swaying in the same wind that moves the canopy. Fades
+// out with distance so the edge blends into the textured ground plane.
+function GrassField({ count = 10000, inner = 1.2, outer = 22 }: { count?: number; inner?: number; outer?: number }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const shaderRef = useRef<{ uniforms: { uTime: { value: number } } } | null>(null);
+
+  // A single tapered blade: a narrow triangle-ish quad that bends toward the tip.
+  const geometry = useMemo(() => {
+    const g = new THREE.PlaneGeometry(0.06, 0.6, 1, 4);
+    g.translate(0, 0.3, 0); // pivot at the root
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      const t = y / 0.6;
+      // Taper to a point and curl forward toward the tip.
+      pos.setX(i, pos.getX(i) * (1 - t * 0.85));
+      pos.setZ(i, pos.getZ(i) + t * t * 0.12);
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, []);
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    let placed = 0;
+    let guard = 0;
+    while (placed < count && guard < count * 4) {
+      guard++;
+      // Ring distribution, denser near the trunk.
+      const a = Math.random() * Math.PI * 2;
+      const r = inner + Math.pow(Math.random(), 0.7) * (outer - inner);
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      dummy.position.set(x, 0, z);
+      dummy.rotation.set(
+        (Math.random() - 0.5) * 0.3,
+        Math.random() * Math.PI * 2,
+        (Math.random() - 0.5) * 0.35,
+      );
+      const s = 0.7 + Math.random() * 0.9;
+      dummy.scale.set(s, s * (0.8 + Math.random() * 0.6), s);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(placed, dummy.matrix);
+      const l = 0.28 + Math.random() * 0.22;
+      color.setHSL(0.26 + (Math.random() - 0.5) * 0.04, 0.55, l);
+      mesh.setColorAt(placed, color);
+      placed++;
+    }
+    mesh.count = placed;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [count, inner, outer]);
+
+  useLayoutEffect(() => {
+    const mat = matRef.current;
+    if (!mat) return;
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.vertexShader =
+        "uniform float uTime;\n" +
+        shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+           #ifdef USE_INSTANCING
+           float bladeH = clamp(position.y / 0.6, 0.0, 1.0);
+           float ph = instanceMatrix[3].x * 1.3 + instanceMatrix[3].z * 0.7;
+           float sway = sin(uTime * 1.6 + ph) * 0.10 + sin(uTime * 0.7 + ph * 1.7) * 0.05;
+           transformed.x += sway * bladeH * bladeH;
+           transformed.z += cos(uTime * 1.2 + ph) * 0.05 * bladeH * bladeH;
+           #endif`,
+        );
+      shaderRef.current = shader as unknown as { uniforms: { uTime: { value: number } } };
+    };
+    mat.needsUpdate = true;
+  }, []);
+
+  useFrame((state) => {
+    if (shaderRef.current) shaderRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, count]} frustumCulled={false} receiveShadow>
+      <primitive object={geometry} attach="geometry" />
+      <meshStandardMaterial
+        ref={matRef}
+        color="#5f8f43"
+        side={THREE.DoubleSide}
+        roughness={0.9}
+        metalness={0}
+      />
+    </instancedMesh>
   );
 }
 
@@ -668,7 +867,7 @@ function Canopy({
 
 /* ---------- Woody parts ---------- */
 
-function Branch({ limb, bark }: { limb: Limb; bark: { map: THREE.CanvasTexture; bump: THREE.CanvasTexture } }) {
+function Branch({ limb, bark }: { limb: Limb; bark: { map: THREE.CanvasTexture; normal: THREE.CanvasTexture } }) {
   const geometry = useMemo(() => {
     const a = new THREE.Vector3(...limb.from);
     const b = new THREE.Vector3(...limb.to);
@@ -684,7 +883,7 @@ function Branch({ limb, bark }: { limb: Limb; bark: { map: THREE.CanvasTexture; 
   const color = limb.kind === "root" ? "#4a3222" : "#6b4a30";
   return (
     <mesh geometry={geometry} castShadow receiveShadow>
-      <meshStandardMaterial color={color} map={bark.map} bumpMap={bark.bump} bumpScale={0.02} roughness={0.95} />
+      <meshStandardMaterial color={color} map={bark.map} normalMap={bark.normal} normalScale={BARK_NORMAL_SCALE} roughness={0.92} />
     </mesh>
   );
 }
@@ -722,19 +921,19 @@ function Trunk({
 }: {
   height: number;
   stageIdx: number;
-  bark: { map: THREE.CanvasTexture; bump: THREE.CanvasTexture };
+  bark: { map: THREE.CanvasTexture; normal: THREE.CanvasTexture };
 }) {
   const rBottom = 0.18 + stageIdx * 0.07;
   const rTop = rBottom * 0.45;
   return (
     <mesh position={[0, height / 2, 0]} castShadow receiveShadow>
-      <cylinderGeometry args={[rTop, rBottom, height, 20, 4]} />
-      <meshStandardMaterial color="#6b4a30" map={bark.map} bumpMap={bark.bump} bumpScale={0.03} roughness={0.95} />
+      <cylinderGeometry args={[rTop, rBottom, height, 32, 6]} />
+      <meshStandardMaterial color="#6b4a30" map={bark.map} normalMap={bark.normal} normalScale={TRUNK_NORMAL_SCALE} roughness={0.92} />
     </mesh>
   );
 }
 
-function Ground({ grass }: { grass: THREE.CanvasTexture }) {
+function Ground({ grass, normal }: { grass: THREE.CanvasTexture; normal: THREE.CanvasTexture }) {
   return (
     <group>
       {/* Dark soil backdrop — gives the underground volume depth so the family
@@ -750,6 +949,8 @@ function Ground({ grass }: { grass: THREE.CanvasTexture }) {
         <circleGeometry args={[60, 64]} />
         <meshStandardMaterial
           map={grass}
+          normalMap={normal}
+          normalScale={GROUND_NORMAL_SCALE}
           color="#6f9a58"
           roughness={1}
           transparent
