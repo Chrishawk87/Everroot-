@@ -222,7 +222,7 @@ export function computeLayout(graph: ForestGraph): ForestLayout {
     const a = (i / FLARES) * Math.PI * 2 + 0.3;
     const spread = (1.2 + hash01(`flare${i}`, 3) * 0.9) * (1 + rootedness * 0.7) * (0.7 + gs * 0.3);
     limbs.push({
-      from: [Math.cos(a) * flareStart, forkHeight * 0.5, Math.sin(a) * flareStart],
+      from: [Math.cos(a) * flareStart, growth.trunkRadiusBottom * 0.5, Math.sin(a) * flareStart],
       to: [Math.cos(a) * spread, -0.18 - hash01(`flare${i}`, 7) * 0.2, Math.sin(a) * spread],
       kind: "flare",
     });
@@ -237,7 +237,7 @@ export function computeLayout(graph: ForestGraph): ForestLayout {
     const reach = 0.35 + hash01(`tap${i}`, 4) * 0.6;
     const depth = 1.4 + rootedness * 2.6 + hash01(`tap${i}`, 9) * 0.8;
     limbs.push({
-      from: [Math.cos(a) * flareStart * 0.6, forkHeight * 0.2, Math.sin(a) * flareStart * 0.6],
+      from: [Math.cos(a) * flareStart * 0.6, growth.trunkRadiusBottom * 0.2, Math.sin(a) * flareStart * 0.6],
       to: [Math.cos(a) * reach, -depth, Math.sin(a) * reach],
       kind: "root",
     });
