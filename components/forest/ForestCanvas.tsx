@@ -6,7 +6,7 @@ import { OrbitControls, Html, Sky, Environment, Lightformer } from "@react-three
 import { EffectComposer, Bloom, Vignette, SMAA } from "@react-three/postprocessing";
 import * as THREE from "three";
 import type { ForestGraph, ForestNodeDTO, GrowthStage } from "@/lib/forest/types";
-import { computeLayout, type PositionedNode, type Vec3, type Limb, type ForestLayout } from "@/lib/forest/layout";
+import { computeLayout, type PositionedNode, type Vec3, type Limb, type Fork, type ForestLayout } from "@/lib/forest/layout";
 
 const COLORS: Record<string, string> = {
   SEED: "#c9a86a",
@@ -638,6 +638,14 @@ export default function ForestCanvas({ graph, selectedId, focusId, onSelect, mem
       {/* Woody structure: a thick base to the fork height, then the two great
           forks and every branch continue as tapered tubes. */}
       <Trunk height={layout.forkHeight} stageIdx={stageIdx} bark={barkTex} />
+      {layout.forkHeight > 0 ? (
+        <LivingTrunk
+          forkHeight={layout.forkHeight}
+          forks={layout.forks}
+          baseRadius={0.3 + stageIdx * 0.08}
+          nightRef={nightRef}
+        />
+      ) : null}
       {layout.limbs
         .filter((l) => l.kind !== "twig")
         .map((limb, i) => (
@@ -1108,6 +1116,123 @@ function Trunk({
       <cylinderGeometry args={[rTop, rBottom, height, 32, 6]} />
       <meshStandardMaterial color="#b39a7c" map={bark.map} normalMap={bark.normal} normalScale={TRUNK_NORMAL_SCALE} roughness={0.92} />
     </mesh>
+  );
+}
+
+// The trunk is alive: faint golden veins spiral up beneath the bark and out
+// along the two forks, and soft golden particles drift up through them —
+// memories moving through the body of a life. Purely additive glow over the
+// existing trunk, so it never alters the woody structure. Brightens after dark.
+function LivingTrunk({
+  forkHeight,
+  forks,
+  baseRadius,
+  nightRef,
+}: {
+  forkHeight: number;
+  forks: Fork[];
+  baseRadius: number;
+  nightRef?: React.MutableRefObject<number>;
+}) {
+  const glowTex = useMemo(makeGlowSprite, []);
+
+  const veinMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color("#ffcf7a"),
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    [],
+  );
+
+  const veinGeoms = useMemo(() => {
+    const geoms: THREE.TubeGeometry[] = [];
+    // Strands spiralling up the base column.
+    const STRANDS = 5;
+    for (let i = 0; i < STRANDS; i++) {
+      const phase = (i / STRANDS) * Math.PI * 2;
+      const pts: THREE.Vector3[] = [];
+      const SEG = 12;
+      for (let s = 0; s <= SEG; s++) {
+        const t = s / SEG;
+        const r = (baseRadius * (1 - t) + 0.19 * t) * 1.015;
+        const ang = phase + t * 2.4;
+        pts.push(new THREE.Vector3(Math.cos(ang) * r, t * forkHeight, Math.sin(ang) * r));
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      geoms.push(new THREE.TubeGeometry(curve, SEG * 2, 0.012, 5, false));
+    }
+    // A vein continues up each great fork.
+    for (const f of forks) {
+      const a = new THREE.Vector3(...f.base);
+      const b = new THREE.Vector3(...f.tip);
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      mid.y += a.distanceTo(b) * 0.18;
+      const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+      geoms.push(new THREE.TubeGeometry(curve, 18, 0.013, 5, false));
+    }
+    return geoms;
+  }, [forkHeight, forks, baseRadius]);
+
+  // Golden particles rising through the trunk column and up toward the forks.
+  const COUNT = 44;
+  const topY = forkHeight + Math.max(...forks.map((f) => f.tip[1] - f.base[1]), 1) * 0.6;
+  const { partGeo, speeds } = useMemo(() => {
+    const positions = new Float32Array(COUNT * 3);
+    const speeds = new Float32Array(COUNT);
+    for (let i = 0; i < COUNT; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * baseRadius * 0.9;
+      positions[i * 3] = Math.cos(a) * r;
+      positions[i * 3 + 1] = Math.random() * topY;
+      positions[i * 3 + 2] = Math.sin(a) * r;
+      speeds[i] = 0.25 + Math.random() * 0.5;
+    }
+    const partGeo = new THREE.BufferGeometry();
+    partGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return { partGeo, speeds };
+  }, [baseRadius, topY]);
+
+  const partRef = useRef<THREE.Points>(null);
+
+  useFrame((state, delta) => {
+    const t = state.clock.elapsedTime;
+    const night = nightRef ? nightRef.current : 0;
+    veinMaterial.opacity = (0.4 + night * 0.35) * (0.75 + Math.sin(t * 1.3) * 0.25);
+    if (partRef.current) {
+      const pos = partRef.current.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < COUNT; i++) {
+        let y = pos.getY(i) + speeds[i] * delta;
+        if (y > topY) y = 0;
+        pos.setY(i, y);
+      }
+      pos.needsUpdate = true;
+    }
+  });
+
+  return (
+    <group>
+      {veinGeoms.map((g, i) => (
+        <mesh key={i} geometry={g} material={veinMaterial} />
+      ))}
+      <points ref={partRef} geometry={partGeo}>
+        <pointsMaterial
+          map={glowTex}
+          size={0.13}
+          color="#ffd98a"
+          transparent
+          opacity={0.85}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+          toneMapped={false}
+        />
+      </points>
+    </group>
   );
 }
 
